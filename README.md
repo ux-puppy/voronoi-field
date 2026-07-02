@@ -13,6 +13,12 @@ npm run dev
 
 Open the URL shown in the terminal (typically `http://localhost:5173`).
 
+### Live demo (GitHub Pages)
+
+https://ux-puppy.github.io/voronoi-field/
+
+Deployed automatically from `main` via GitHub Actions.
+
 ### Production build
 
 ```bash
