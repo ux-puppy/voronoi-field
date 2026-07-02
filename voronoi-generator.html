@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Voronoi Field</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+  :root{
+    --bg: #070a10;
+    --panel: #0d121c;
+    --panel-line: #1b2333;
+    --text: #d7dee8;
+    --muted: #66748d;
+    --accent: #4fe0c5;      /* teal — cell glow */
+    --accent-2: #ff9f5a;    /* amber — origin marker */
+    --accent-dim: #2c8f7c;
+  }
+  *{ box-sizing: border-box; }
+  html, body{
+    margin:0; padding:0; height:100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Grotesk', sans-serif;
+    overflow:hidden;
+  }
+  #app{
+    display:flex;
+    width:100vw; height:100vh;
+  }
+
+  /* ---------- canvas stage ---------- */
+  #stage{
+    position:relative;
+    flex:1;
+    min-width:0;
+    background: var(--bg);
+  }
+  canvas{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    cursor: crosshair;
+  }
+  canvas.dragging{ cursor: grabbing; }
+
+  #hint{
+    position:absolute; bottom:16px; left:16px;
+    font-family:'JetBrains Mono', monospace;
+    font-size:11px; letter-spacing:.03em;
+    color: var(--muted);
+    pointer-events:none;
+    transition: opacity .4s ease;
+    line-height:1.6;
+  }
+  #stats{
+    position:absolute; top:16px; left:16px;
+    font-family:'JetBrains Mono', monospace;
+    font-size:11px; letter-spacing:.03em;
+    color: var(--muted);
+    line-height:1.6;
+    pointer-events:none;
+  }
+  #stats span{ color: var(--accent); }
+
+  /* ---------- control panel ---------- */
+  #panel{
+    width: 300px;
+    flex-shrink:0;
+    background: var(--panel);
+    border-left: 1px solid var(--panel-line);
+    padding: 28px 24px;
+    display:flex; flex-direction:column;
+    gap: 26px;
+    overflow-y:auto;
+  }
+  #panel h1{
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    margin: 0 0 2px 0;
+    display:flex; align-items:center; gap:10px;
+  }
+  #panel h1 .dot{
+    width:8px; height:8px; border-radius:50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+  }
+  #panel .sub{
+    font-family:'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing:.02em;
+    margin-bottom: 4px;
+  }
+
+  .field{ display:flex; flex-direction:column; gap:8px; }
+  .field .row{
+    display:flex; justify-content:space-between; align-items:baseline;
+  }
+  .field label{
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .field .val{
+    font-family:'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+    min-width: 46px;
+    text-align:right;
+  }
+  .field .desc{
+    font-size: 11px;
+    color: var(--muted);
+    line-height:1.5;
+  }
+
+  input[type=range]{
+    -webkit-appearance:none;
+    appearance:none;
+    width:100%; height:3px;
+    background: var(--panel-line);
+    border-radius:2px;
+    outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;
+    width:14px; height:14px;
+    border-radius:50%;
+    background: var(--accent);
+    border: 2px solid #07100d;
+    box-shadow: 0 0 0 1px var(--accent-dim);
+    cursor:pointer;
+    margin-top:-5.5px;
+  }
+  input[type=range]::-moz-range-thumb{
+    width:14px; height:14px;
+    border-radius:50%;
+    background: var(--accent);
+    border: 2px solid #07100d;
+    cursor:pointer;
+  }
+  input[type=range]::-webkit-slider-runnable-track{
+    height:3px; border-radius:2px;
+    background: var(--panel-line);
+  }
+
+  hr{
+    border:none; border-top:1px solid var(--panel-line);
+    margin:0;
+  }
+
+  .toggles{ display:flex; flex-direction:column; gap:10px; }
+  .switch-row{
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .switch-row label{ font-size:12.5px; color:var(--text); font-weight:500; }
+  .switch{
+    width:34px; height:19px;
+    border-radius: 10px;
+    background: var(--panel-line);
+    position:relative;
+    cursor:pointer;
+    transition: background .2s ease;
+    flex-shrink:0;
+  }
+  .switch.on{ background: var(--accent-dim); }
+  .switch::after{
+    content:'';
+    position:absolute; top:2px; left:2px;
+    width:15px; height:15px;
+    border-radius:50%;
+    background: #cfd8e3;
+    transition: transform .2s ease, background .2s ease;
+  }
+  .switch.on::after{
+    transform: translateX(15px);
+    background: var(--accent);
+  }
+
+  button{
+    font-family:'Space Grotesk', sans-serif;
+    font-size:12.5px; font-weight:600;
+    letter-spacing:.02em;
+    padding: 10px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--panel-line);
+    background: transparent;
+    color: var(--text);
+    cursor:pointer;
+    transition: border-color .15s ease, color .15s ease, background .15s ease;
+  }
+  button:hover{
+    border-color: var(--accent-dim);
+    color: var(--accent);
+    background: rgba(79,224,197,0.06);
+  }
+  button.secondary{
+    font-size:11.5px;
+    padding: 8px 12px;
+    color: var(--muted);
+  }
+
+  #originList{
+    display:flex; flex-direction:column; gap:6px;
+    max-height: 140px;
+    overflow-y:auto;
+  }
+  .origin-row{
+    display:flex; align-items:center; justify-content:space-between;
+    font-family:'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--panel-line);
+    border-radius: 5px;
+    padding: 6px 8px;
+  }
+  .origin-row .swatch{
+    width:8px; height:8px; border-radius:50%;
+    background: var(--accent-2);
+    display:inline-block;
+    margin-right:8px;
+  }
+  .origin-row button{
+    padding: 2px 7px;
+    font-size: 10px;
+    border-radius: 4px;
+  }
+
+  #panel::-webkit-scrollbar{ width:6px; }
+  #panel::-webkit-scrollbar-thumb{ background: var(--panel-line); border-radius:3px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="stats">CELLS <span id="cellCount">0</span><br>ORIGINS <span id="originCount">0</span></div>
+    <div id="hint">click empty space to add an origin<br>drag an origin to move it &middot; double-click to remove</div>
+  </div>
+
+  <div id="panel">
+    <div>
+      <h1><span class="dot"></span>VORONOI FIELD</h1>
+      <div class="sub">radial density tessellation</div>
+    </div>
+
+    <hr>
+
+    <div class="field">
+      <div class="row"><label>Origin density</label><span class="val" id="v-origin">72</span></div>
+      <input type="range" id="originDensity" min="1" max="100" value="72">
+      <div class="desc">How tightly points cluster at each origin.</div>
+    </div>
+
+    <div class="field">
+      <div class="row"><label>Outer density</label><span class="val" id="v-outer">8</span></div>
+      <input type="range" id="outerDensity" min="0" max="100" value="8">
+      <div class="desc">Point density far from every origin.</div>
+    </div>
+
+    <div class="field">
+      <div class="row"><label>Falloff radius</label><span class="val" id="v-radius">260</span></div>
+      <input type="range" id="radius" min="20" max="900" value="260">
+      <div class="desc">Distance over which density fades from origin to outer.</div>
+    </div>
+
+    <div class="field">
+      <div class="row"><label>Falloff curve</label><span class="val" id="v-falloff">Linear</span></div>
+      <input type="range" id="falloff" min="20" max="500" value="100">
+      <div class="desc">Left: density collapses sharply right at the origin. Right: density holds near the origin then drops sharply at the edge.</div>
+    </div>
+
+    <hr>
+
+    <div class="toggles">
+      <div class="switch-row">
+        <label>Drift</label>
+        <div class="switch on" id="toggle-drift"></div>
+      </div>
+      <div class="switch-row">
+        <label>Fill cells</label>
+        <div class="switch on" id="toggle-fill"></div>
+      </div>
+      <div class="switch-row">
+        <label>Show points</label>
+        <div class="switch" id="toggle-points"></div>
+      </div>
+    </div>
+
+    <hr>
+
+    <div class="field">
+      <div class="row"><label>Origins</label></div>
+      <div id="originList"></div>
+    </div>
+
+    <button id="regenerate">Regenerate points</button>
+    <button class="secondary" id="resetOrigins">Reset to single origin</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('cv');
+  const ctx = canvas.getContext('2d');
+  const stage = document.getElementById('stage');
+
+  let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+  function resize(){
+    const r = stage.getBoundingClientRect();
+    W = r.width; H = r.height;
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+
+  // ---------------- state ----------------
+  const state = {
+    originDensity: 72,
+    outerDensity: 8,
+    radius: 260,
+    falloffExp: 1,       // <1 sharp near origin, 1 linear-ish, >1 sharp near edge
+    origins: [],          // [{x,y}]
+    drift: true,
+    fill: true,
+    showPoints: false
+  };
+
+  let points = []; // {x,y,vx,vy}
+  const BASE_CANDIDATES = 5200; // sampling budget at reference area
+  const REF_AREA = 900 * 560;
+
+  function lerp(a,b,t){ return a + (b-a)*t; }
+
+  function densityAt(x,y){
+    let miss = 1;
+    for(const o of state.origins){
+      const dx = x - o.x, dy = y - o.y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      const t = Math.min(d / Math.max(state.radius,1), 1);
+      const shaped = Math.pow(t, state.falloffExp);
+      const di = lerp(state.originDensity, state.outerDensity, shaped) / 100;
+      miss *= (1 - Math.max(0, Math.min(1, di)));
+    }
+    return 1 - miss;
+  }
+
+  function generatePoints(){
+    if(state.origins.length === 0){ points = []; return; }
+    const area = W * H;
+    const candidateCount = Math.max(200, Math.round(BASE_CANDIDATES * (area / REF_AREA)));
+    const pts = [];
+    for(let i=0;i<candidateCount;i++){
+      const x = Math.random()*W;
+      const y = Math.random()*H;
+      const p = densityAt(x,y);
+      if(Math.random() < p){
+        pts.push({
+          x, y,
+          vx: (Math.random()-0.5) * 6,
+          vy: (Math.random()-0.5) * 6
+        });
+      }
+    }
+    points = pts;
+  }
+
+  // ---------------- drift ----------------
+  function stepDrift(){
+    for(const p of points){
+      p.vx += (Math.random()-0.5) * 2.2;
+      p.vy += (Math.random()-0.5) * 2.2;
+      p.vx = Math.max(-14, Math.min(14, p.vx * 0.985));
+      p.vy = Math.max(-14, Math.min(14, p.vy * 0.985));
+      p.x += p.vx * 0.06;
+      p.y += p.vy * 0.06;
+      if(p.x < 0){ p.x = 0; p.vx *= -1; }
+      if(p.x > W){ p.x = W; p.vx *= -1; }
+      if(p.y < 0){ p.y = 0; p.vy *= -1; }
+      if(p.y > H){ p.y = H; p.vy *= -1; }
+    }
+  }
+
+  // ---------------- render ----------------
+  function lerpC(a,b,t){ return a + (b-a)*t; }
+  const ACCENT = [79,224,197];
+
+  function render(){
+    ctx.clearRect(0,0,W,H);
+
+    if(points.length > 2){
+      const delaunay = d3.Delaunay.from(points, p=>p.x, p=>p.y);
+      const voronoi = delaunay.voronoi([0,0,W,H]);
+
+      if(state.fill){
+        for(let i=0;i<points.length;i++){
+          const cell = voronoi.cellPolygon(i);
+          if(!cell) continue;
+          let minD = Infinity;
+          for(const o of state.origins){
+            const dx = points[i].x - o.x, dy = points[i].y - o.y;
+            const d = Math.sqrt(dx*dx+dy*dy);
+            if(d < minD) minD = d;
+          }
+          const t = Math.min(minD / Math.max(state.radius*1.4,1), 1);
+          const r = lerpC(ACCENT[0], 12, t);
+          const g = lerpC(ACCENT[1], 16, t);
+          const b = lerpC(ACCENT[2], 26, t);
+          const alpha = lerpC(0.16, 0.02, t);
+          ctx.beginPath();
+          cell.forEach(([x,y],idx)=> idx===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y));
+          ctx.closePath();
+          ctx.fillStyle = `rgba(${r|0},${g|0},${b|0},${alpha})`;
+          ctx.fill();
+        }
+      }
+
+      ctx.strokeStyle = '#ffffff';
+      ctx.globalAlpha = 0.85;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      voronoi.render(ctx);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      if(state.showPoints){
+        ctx.fillStyle = 'rgba(79,224,197,0.85)';
+        for(const p of points){
+          ctx.beginPath();
+          ctx.arc(p.x,p.y,1.6,0,Math.PI*2);
+          ctx.fill();
+        }
+      }
+    }
+
+    for(const o of state.origins){
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,159,90,0.35)';
+      ctx.setLineDash([3,4]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, state.radius, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, 5, 0, Math.PI*2);
+      ctx.fillStyle = '#ff9f5a';
+      ctx.shadowColor = '#ff9f5a';
+      ctx.shadowBlur = 10;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    document.getElementById('cellCount').textContent = points.length;
+    document.getElementById('originCount').textContent = state.origins.length;
+  }
+
+  function loop(){
+    if(state.drift) stepDrift();
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  // ---------------- origin list UI ----------------
+  function refreshOriginList(){
+    const list = document.getElementById('originList');
+    list.innerHTML = '';
+    state.origins.forEach((o, i)=>{
+      const row = document.createElement('div');
+      row.className = 'origin-row';
+      row.innerHTML = '<span><span class="swatch"></span>#' + (i+1) + ' — ' + (o.x|0) + ', ' + (o.y|0) + '</span>';
+      const btn = document.createElement('button');
+      btn.textContent = 'remove';
+      btn.addEventListener('click', ()=>{
+        if(state.origins.length <= 1) return;
+        state.origins.splice(i,1);
+        generatePoints();
+        refreshOriginList();
+      });
+      row.appendChild(btn);
+      list.appendChild(row);
+    });
+  }
+
+  // ---------------- controls ----------------
+  function bindSlider(id, valId, key, onChange, formatter){
+    const el = document.getElementById(id);
+    const val = document.getElementById(valId);
+    el.addEventListener('input', ()=>{
+      state[key] = Number(el.value);
+      val.textContent = formatter ? formatter(Number(el.value)) : el.value;
+      if(onChange) onChange();
+    });
+  }
+  bindSlider('originDensity','v-origin','originDensity', generatePoints);
+  bindSlider('outerDensity','v-outer','outerDensity', generatePoints);
+  bindSlider('radius','v-radius','radius', generatePoints);
+
+  const falloffEl = document.getElementById('falloff');
+  const falloffVal = document.getElementById('v-falloff');
+  function falloffLabel(exp){
+    if(exp < 0.55) return 'Sharp @ origin';
+    if(exp > 1.8) return 'Sharp @ edge';
+    return 'Linear';
+  }
+  falloffEl.addEventListener('input', ()=>{
+    state.falloffExp = Number(falloffEl.value) / 100;
+    falloffVal.textContent = falloffLabel(state.falloffExp);
+    generatePoints();
+  });
+
+  function bindSwitch(id, key){
+    const el = document.getElementById(id);
+    el.addEventListener('click', ()=>{
+      state[key] = !state[key];
+      el.classList.toggle('on', state[key]);
+    });
+  }
+  bindSwitch('toggle-drift','drift');
+  bindSwitch('toggle-fill','fill');
+  bindSwitch('toggle-points','showPoints');
+
+  document.getElementById('regenerate').addEventListener('click', generatePoints);
+  document.getElementById('resetOrigins').addEventListener('click', ()=>{
+    state.origins = [{x: W/2, y: H/2}];
+    generatePoints();
+    refreshOriginList();
+  });
+
+  // ---------------- origin drag / add / remove ----------------
+  let draggingIdx = -1;
+  const HIT_RADIUS = 14;
+
+  function evPos(e){
+    const r = canvas.getBoundingClientRect();
+    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
+    const cy = (e.touches ? e.touches[0].clientY : e.clientY) - r.top;
+    return [Math.max(0,Math.min(W,cx)), Math.max(0,Math.min(H,cy))];
+  }
+  function findOriginAt(x,y){
+    for(let i=state.origins.length-1;i>=0;i--){
+      const o = state.origins[i];
+      const dx = o.x-x, dy = o.y-y;
+      if(Math.sqrt(dx*dx+dy*dy) <= HIT_RADIUS) return i;
+    }
+    return -1;
+  }
+
+  function onDown(e){
+    const [x,y] = evPos(e);
+    const idx = findOriginAt(x,y);
+    if(idx >= 0){
+      draggingIdx = idx;
+    } else {
+      state.origins.push({x,y});
+      draggingIdx = state.origins.length - 1;
+      generatePoints();
+      refreshOriginList();
+    }
+    canvas.classList.add('dragging');
+    document.getElementById('hint').style.opacity = '0';
+  }
+  function onMove(e){
+    if(draggingIdx < 0) return;
+    const [x,y] = evPos(e);
+    state.origins[draggingIdx].x = x;
+    state.origins[draggingIdx].y = y;
+    generatePoints();
+    refreshOriginList();
+  }
+  function onUp(){
+    draggingIdx = -1;
+    canvas.classList.remove('dragging');
+  }
+
+  canvas.addEventListener('mousedown', onDown);
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  canvas.addEventListener('touchstart', onDown, {passive:true});
+  canvas.addEventListener('touchmove', onMove, {passive:true});
+  window.addEventListener('touchend', onUp);
+
+  canvas.addEventListener('dblclick', e=>{
+    const [x,y] = evPos(e);
+    const idx = findOriginAt(x,y);
+    if(idx >= 0 && state.origins.length > 1){
+      state.origins.splice(idx,1);
+      generatePoints();
+      refreshOriginList();
+    }
+  });
+
+  window.addEventListener('resize', ()=>{
+    const prevW = W, prevH = H;
+    resize();
+    if(prevW && prevH){
+      const sx = W/prevW, sy = H/prevH;
+      state.origins.forEach(o=>{ o.x *= sx; o.y *= sy; });
+    }
+    generatePoints();
+  });
+
+  requestAnimationFrame(()=>{
+    resize();
+    state.origins = [{x: W/2, y: H/2}];
+    generatePoints();
+    refreshOriginList();
+    loop();
+  });
+})();
+</script>
+</body>
+</html>
